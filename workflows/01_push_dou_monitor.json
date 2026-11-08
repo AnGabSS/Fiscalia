@@ -1,0 +1,1120 @@
+{
+  "id": "fiscalia-wf-01-push-dou-monitor",
+  "name": "01_push_dou_monitor",
+  "active": false,
+  "versionId": "f15ca11a-0001-4000-8000-000000000001",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "fiscalia-local-n8n-instance"
+  },
+  "tags": [
+    {
+      "id": "tag-fiscalia-push",
+      "name": "fiscalia-push"
+    },
+    {
+      "id": "tag-reforma-tributaria",
+      "name": "reforma-tributaria"
+    }
+  ],
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "node-schedule-trigger-2h",
+      "name": "Schedule Trigger (2h)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        180,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "simular-dou",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "node-webhook-simular-dou",
+      "name": "Webhook Simular DOU",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        180,
+        460
+      ],
+      "webhookId": "simular-dou"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rawInput = $input.first()?.json || {};\nconst body = rawInput.body && typeof rawInput.body === 'object' ? rawInput.body : rawInput;\n\nconst isWebhook = Boolean(rawInput.headers || rawInput.webhookUrl || body.action);\nlet action = (body.action || (isWebhook ? 'replay' : 'live')).toString().trim().toLowerCase();\n\nif (!['live', 'replay', 'backfill_embeddings'].includes(action)) {\n  action = 'replay';\n}\n\nreturn [\n  {\n    json: {\n      action,\n      act_number: body.act_number ? String(body.act_number).trim() : null,\n      ordinance_id: body.ordinance_id ? String(body.ordinance_id).trim() : null,\n      force_redeliver: body.force_redeliver !== undefined ? Boolean(body.force_redeliver) : true,\n      rss_url: body.rss_url || $env.RFB_RSS_URL || 'http://normas.receita.fazenda.gov.br/sijut2consulta/rss.action',\n      custom_ordinance: body.custom_ordinance || null,\n      triggered_at: new Date().toISOString()\n    }\n  }\n];"
+      },
+      "id": "node-normalize-trigger-input",
+      "name": "Normalizar Entrada e Modo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        350
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-mode-live",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "live",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "live"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-mode-replay",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "replay",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "replay"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-mode-backfill",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "backfill_embeddings",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "backfill_embeddings"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-switch-execution-mode",
+      "name": "Roteador de Modo (Live / Replay / Backfill)",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        680,
+        350
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.rss_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 20000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "FiscaliaBot/1.0 (+https://gov.br/receitafederal; Monitoramento Tributario LC214)"
+            },
+            {
+              "name": "Accept",
+              "value": "application/rss+xml, application/xml, text/xml, text/html, */*"
+            }
+          ]
+        }
+      },
+      "id": "node-http-fetch-rfb-rss",
+      "name": "HTTP Request - Feed Normas RFB / DOU",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        120
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst items = $input.all();\nconst triggerMeta = $('Normalizar Entrada e Modo').first()?.json || {};\n\nconst TAX_REFORM_REGEX = /\\b(IBS|CBS|Imposto\\s+Seletivo|LC\\s*214|EC\\s*132|Split\\s+Payment|IVA|PIS|COFINS|ICMS|ISS|NFS-?e|Redutor|Cesta\\s+B[aá]sica|Regime\\s+Espec[ií]fico)\\b/i;\n\nfunction stripHtml(html) {\n  return String(html || '')\n    .replace(/<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>/gi, '$1')\n    .replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')\n    .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/&nbsp;/gi, ' ')\n    .replace(/&amp;/gi, '&')\n    .replace(/&quot;/gi, '\"')\n    .replace(/&#39;/gi, \"'\")\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nconst candidates = [];\n\nif (triggerMeta.custom_ordinance && typeof triggerMeta.custom_ordinance === 'object') {\n  const custom = triggerMeta.custom_ordinance;\n  const rawText = stripHtml(`${custom.act_number || ''} ${custom.title || ''} ${custom.raw_excerpt || ''}`);\n  const hash = crypto.createHash('sha256').update(custom.official_url || rawText).digest('hex');\n  candidates.push({\n    external_hash: hash,\n    act_number: custom.act_number || 'ATO NORMATIVO RFB/DOU',\n    title: custom.title || 'Ato Normativo da Reforma Tributária',\n    official_url: custom.official_url || 'http://normas.receita.fazenda.gov.br/',\n    published_at: custom.published_at || new Date().toISOString().slice(0, 10),\n    raw_excerpt: rawText.slice(0, 6000)\n  });\n} else {\n  const rawPayload = items[0]?.json?.data || items[0]?.json?.body || '';\n  const itemRegex = /<item[^>]*>([\\s\\S]*?)<\\/item>/gi;\n  let match;\n  while ((match = itemRegex.exec(rawPayload)) !== null) {\n    const block = match[1];\n    const titleMatch = block.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i);\n    const linkMatch = block.match(/<link[^>]*>([\\s\\S]*?)<\\/link>/i);\n    const descMatch = block.match(/<description[^>]*>([\\s\\S]*?)<\\/description>/i);\n    const pubDateMatch = block.match(/<pubDate[^>]*>([\\s\\S]*?)<\\/pubDate>/i);\n\n    const title = stripHtml(titleMatch ? titleMatch[1] : '');\n    const officialUrl = stripHtml(linkMatch ? linkMatch[1] : '');\n    const description = stripHtml(descMatch ? descMatch[1] : '');\n    const fullText = `${title}\\n\\n${description}`.trim();\n\n    if (!fullText || !TAX_REFORM_REGEX.test(fullText)) {\n      continue;\n    }\n\n    const actNumberMatch = title.match(/^((?:Instru[cç][aã]o\\s+Normativa|Portaria|Ato\\s+Declarat[oó]rio|Resolu[cç][aã]o|Lei\\s+Complementar|Soluc[aã]o\\s+de\\s+Consulta)[^-–:]*)/i);\n    const actNumber = actNumberMatch ? actNumberMatch[1].trim() : title.slice(0, 80);\n\n    let publishedAt = new Date().toISOString().slice(0, 10);\n    if (pubDateMatch) {\n      const parsedDate = new Date(stripHtml(pubDateMatch[1]));\n      if (!isNaN(parsedDate.getTime())) {\n        publishedAt = parsedDate.toISOString().slice(0, 10);\n      }\n    }\n\n    const externalHash = crypto\n      .createHash('sha256')\n      .update(`${officialUrl}|${actNumber}|${title}`)\n      .digest('hex');\n\n    candidates.push({\n      external_hash: externalHash,\n      act_number: actNumber,\n      title,\n      official_url: officialUrl || 'http://normas.receita.fazenda.gov.br/',\n      published_at: publishedAt,\n      raw_excerpt: fullText.slice(0, 6000)\n    });\n  }\n}\n\nreturn candidates.slice(0, 10).map((c) => ({ json: c }));"
+      },
+      "id": "node-parse-rss-and-regex-filter",
+      "name": "Extrair HTML, SHA-256 e Pré-Filtro Regex",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1220,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  $1::text AS external_hash,\n  $2::text AS act_number,\n  $3::text AS title,\n  $4::text AS official_url,\n  $5::text AS published_at,\n  $6::text AS raw_excerpt,\n  EXISTS (\n    SELECT 1 FROM public.ordinances o WHERE o.external_hash = $1::text\n  ) AS already_exists;",
+        "options": {
+          "queryReplacement": "={{ [$json.external_hash, $json.act_number, $json.title, $json.official_url, $json.published_at, $json.raw_excerpt] }}"
+        }
+      },
+      "id": "node-pg-check-hash",
+      "name": "Postgres - Verificar external_hash Existente",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1480,
+        120
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "fiscalia-postgres-cred",
+          "name": "Fiscalia Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-hash-not-exists",
+              "leftValue": "={{ $json.already_exists }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-if-new-ordinance",
+      "name": "IF - Ato Inédito?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1720,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/{{ $env.GEMINI_MODEL_TRIAGE || 'gemini-2.5-flash' }}:generateContent?key={{ $env.GEMINI_API_KEY }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"systemInstruction\": {\n    \"parts\": [\n      {\n        \"text\": \"Você é um Auditor e Consultor Tributário Sênior especialista na Reforma Tributária Brasileira (EC 132/2023 e LC 214/2025 - IBS, CBS, Imposto Seletivo e Split Payment). Analise o ato normativo abaixo e retorne ESTRITAMENTE um objeto JSON válido com os campos: relevante_tributario (boolean), escopo ('GERAL' ou 'ESPECIFICO_SETORIAL'), grau_urgencia ('ALTA', 'MEDIA' ou 'BAIXA'), tributos (array de strings ex: ['IBS','CBS','IS','PIS','COFINS','ICMS','ISS']), affected_sector_slugs (array contendo APENAS slugs canônicos afetados dentre os 12 permitidos: ['tecnologia_saas','saude_servicos_medicos','educacao','agronegocio','varejo_comercio','industria_manufatura','construcao_imobiliario','transporte_logistica','servicos_financeiros','alimentacao_hotelaria','profissoes_regulamentadas','energia_combustiveis_telecom']), setores_afetados (array de objetos com {setor_slug, setor_nome, resumo_impacto_setor, acao_recomendada}), titulo_curto (string), resumo_geral (string executiva clara), previsao_mudanca_vigencia (string indicando data ou exercício de vigência).\"\n      }\n    ]\n  },\n  \"contents\": [\n    {\n      \"role\": \"user\",\n      \"parts\": [\n        {\n          \"text\": \"Ato: \" + $json.act_number + \"\\nTítulo: \" + $json.title + \"\\nData Publicação: \" + $json.published_at + \"\\nURL: \" + $json.official_url + \"\\nExcerto/Texto Integral:\\n\" + $json.raw_excerpt\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"temperature\": 0.1,\n    \"responseMimeType\": \"application/json\"\n  }\n} }}",
+        "options": {
+          "timeout": 45000
+        }
+      },
+      "id": "node-gemini-triage-classification",
+      "name": "Gemini 2.5 Flash - Classificação Multi-Setorial",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const VALID_SLUGS = new Set([\n  'tecnologia_saas',\n  'saude_servicos_medicos',\n  'educacao',\n  'agronegocio',\n  'varejo_comercio',\n  'industria_manufatura',\n  'construcao_imobiliario',\n  'transporte_logistica',\n  'servicos_financeiros',\n  'alimentacao_hotelaria',\n  'profissoes_regulamentadas',\n  'energia_combustiveis_telecom'\n]);\n\nconst sourceItem = $('IF - Ato Inédito?').item.json;\nconst geminiResp = $input.item.json;\nconst rawText =\n  geminiResp?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';\n\nlet parsed;\ntry {\n  parsed = typeof rawText === 'object' ? rawText : JSON.parse(rawText);\n} catch (err) {\n  const cleaned = String(rawText).replace(/^```json\\s*/i, '').replace(/```$/i, '').trim();\n  parsed = JSON.parse(cleaned);\n}\n\nconst escopo = parsed.escopo === 'GERAL' ? 'GERAL' : 'ESPECIFICO_SETORIAL';\nconst grauUrgencia = ['ALTA', 'MEDIA', 'BAIXA'].includes(parsed.grau_urgencia)\n  ? parsed.grau_urgencia\n  : 'MEDIA';\n\nconst validSlugs = Array.isArray(parsed.affected_sector_slugs)\n  ? parsed.affected_sector_slugs.filter((s) => VALID_SLUGS.has(s))\n  : [];\n\nconst setoresAfetados = Array.isArray(parsed.setores_afetados)\n  ? parsed.setores_afetados\n      .filter((item) => item && VALID_SLUGS.has(item.setor_slug))\n      .map((item) => ({\n        setor_slug: item.setor_slug,\n        setor_nome: item.setor_nome || item.setor_slug,\n        resumo_impacto_setor: item.resumo_impacto_setor || parsed.resumo_geral || '',\n        acao_recomendada: item.acao_recomendada || 'Avaliar impactos junto à contabilidade.'\n      }))\n  : [];\n\nconst tributos = Array.isArray(parsed.tributos) && parsed.tributos.length > 0\n  ? parsed.tributos.map((t) => String(t).trim())\n  : ['IBS', 'CBS'];\n\nconst embeddingInputText = [\n  sourceItem.act_number,\n  parsed.titulo_curto || sourceItem.title,\n  parsed.resumo_geral || '',\n  setoresAfetados.map((s) => `${s.setor_nome}: ${s.resumo_impacto_setor}`).join(' | '),\n  sourceItem.raw_excerpt\n].join('\\n').slice(0, 7500);\n\nreturn {\n  json: {\n    external_hash: sourceItem.external_hash,\n    act_number: sourceItem.act_number,\n    title: parsed.titulo_curto || sourceItem.title,\n    official_url: sourceItem.official_url,\n    published_at: sourceItem.published_at,\n    raw_excerpt: sourceItem.raw_excerpt,\n    relevante_tributario: Boolean(parsed.relevante_tributario ?? true),\n    escopo,\n    grau_urgencia: grauUrgencia,\n    tributos,\n    affected_sector_slugs: validSlugs,\n    setores_afetados_detalhe: setoresAfetados,\n    resumo_geral: parsed.resumo_geral || sourceItem.title,\n    previsao_vigencia: parsed.previsao_mudanca_vigencia || 'Conforme cronograma LC 214/2025',\n    embedding_input_text: embeddingInputText\n  }\n};"
+      },
+      "id": "node-validate-gemini-json",
+      "name": "Validar e Sanitizar Classificação Gemini",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-relevante-tributario",
+              "leftValue": "={{ $json.relevante_tributario }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-if-tax-relevant",
+      "name": "IF - Relevante Tributário?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2480,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/{{ $env.GEMINI_EMBEDDING_MODEL || 'text-embedding-004' }}:embedContent?key={{ $env.GEMINI_API_KEY }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"model\": \"models/\" + ($env.GEMINI_EMBEDDING_MODEL || \"text-embedding-004\"),\n  \"content\": {\n    \"parts\": [\n      {\n        \"text\": $json.embedding_input_text\n      }\n    ]\n  },\n  \"outputDimensionality\": 768\n} }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "node-gemini-embedding-live",
+      "name": "Gemini Embedding (text-embedding-004 768d)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2740,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const meta = $('IF - Relevante Tributário?').item.json;\nconst embValues = $input.item.json?.embedding?.values || [];\nconst vectorLiteral = Array.isArray(embValues) && embValues.length === 768\n  ? `[${embValues.join(',')}]`\n  : null;\n\nconst toPgTextArray = (arr) => {\n  if (!Array.isArray(arr) || arr.length === 0) return '{}';\n  return '{' + arr.map((v) => '\"' + String(v).replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, '\\\\\"') + '\"').join(',') + '}';\n};\n\nreturn {\n  json: {\n    ...meta,\n    tributos_pg: toPgTextArray(meta.tributos),\n    affected_sector_slugs_pg: toPgTextArray(meta.affected_sector_slugs),\n    setores_afetados_json: JSON.stringify(meta.setores_afetados_detalhe || []),\n    vector_literal: vectorLiteral\n  }\n};"
+      },
+      "id": "node-prepare-sql-upsert",
+      "name": "Preparar Vetor 768d e Arrays SQL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2980,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO public.ordinances (\n  external_hash,\n  act_number,\n  title,\n  official_url,\n  published_at,\n  raw_excerpt,\n  escopo,\n  grau_urgencia,\n  tributos,\n  affected_sector_slugs,\n  setores_afetados_detalhe,\n  resumo_geral,\n  previsao_vigencia,\n  embedding,\n  is_replay_seed\n) VALUES (\n  $1::text,\n  $2::text,\n  $3::text,\n  $4::text,\n  COALESCE(NULLIF($5::text, '')::date, CURRENT_DATE),\n  $6::text,\n  $7::text,\n  $8::text,\n  $9::text[],\n  $10::text[],\n  $11::jsonb,\n  $12::text,\n  $13::text,\n  CASE WHEN $14::text IS NOT NULL AND $14::text <> '' THEN $14::vector(768) ELSE NULL END,\n  FALSE\n)\nON CONFLICT (external_hash) DO UPDATE SET\n  title = EXCLUDED.title,\n  escopo = EXCLUDED.escopo,\n  grau_urgencia = EXCLUDED.grau_urgencia,\n  tributos = EXCLUDED.tributos,\n  affected_sector_slugs = EXCLUDED.affected_sector_slugs,\n  setores_afetados_detalhe = EXCLUDED.setores_afetados_detalhe,\n  resumo_geral = EXCLUDED.resumo_geral,\n  previsao_vigencia = EXCLUDED.previsao_vigencia,\n  embedding = COALESCE(EXCLUDED.embedding, public.ordinances.embedding)\nRETURNING\n  id,\n  external_hash,\n  act_number,\n  title,\n  official_url,\n  published_at,\n  escopo,\n  grau_urgencia,\n  tributos,\n  affected_sector_slugs,\n  setores_afetados_detalhe,\n  resumo_geral,\n  previsao_vigencia;",
+        "options": {
+          "queryReplacement": "={{ [$json.external_hash, $json.act_number, $json.title, $json.official_url, $json.published_at, $json.raw_excerpt, $json.escopo, $json.grau_urgencia, $json.tributos_pg, $json.affected_sector_slugs_pg, $json.setores_afetados_json, $json.resumo_geral, $json.previsao_vigencia, $json.vector_literal] }}"
+        }
+      },
+      "id": "node-pg-upsert-ordinance",
+      "name": "Postgres - Upsert Ordinance",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3220,
+        120
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "fiscalia-postgres-cred",
+          "name": "Fiscalia Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH selected_seed AS (\n  SELECT o.*\n  FROM public.ordinances o\n  WHERE (\n    ($1::text IS NOT NULL AND $1::text <> '' AND o.id::text = $1::text)\n    OR ($2::text IS NOT NULL AND $2::text <> '' AND o.act_number ILIKE '%' || $2::text || '%')\n    OR ($1::text IS NULL AND $2::text IS NULL AND o.is_replay_seed = TRUE)\n  )\n  ORDER BY\n    CASE WHEN $2::text IS NOT NULL AND o.act_number ILIKE '%' || $2::text || '%' THEN 0 ELSE 1 END,\n    o.published_at DESC\n  LIMIT 1\n),\ncleaned_deliveries AS (\n  DELETE FROM public.alert_deliveries ad\n  USING selected_seed s\n  WHERE ad.ordinance_id = s.id\n    AND $3::boolean = TRUE\n  RETURNING ad.id\n)\nSELECT\n  s.id,\n  s.external_hash,\n  s.act_number,\n  s.title,\n  s.official_url,\n  s.published_at,\n  s.escopo,\n  s.grau_urgencia,\n  s.tributos,\n  s.affected_sector_slugs,\n  s.setores_afetados_detalhe,\n  s.resumo_geral,\n  s.previsao_vigencia\nFROM selected_seed s;",
+        "options": {
+          "queryReplacement": "={{ [$json.ordinance_id, $json.act_number, $json.force_redeliver] }}"
+        }
+      },
+      "id": "node-pg-select-replay-seed",
+      "name": "Postgres - Selecionar Ato Replay Seed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        960,
+        350
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "fiscalia-postgres-cred",
+          "name": "Fiscalia Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  o.id AS ordinance_id,\n  o.act_number,\n  o.title,\n  o.official_url,\n  o.published_at,\n  o.escopo,\n  o.grau_urgencia,\n  o.tributos,\n  o.resumo_geral,\n  o.previsao_vigencia,\n  s.user_id,\n  s.channel_type,\n  s.external_user_id,\n  s.chat_id,\n  s.display_name,\n  s.business_context,\n  s.matched_sector_slugs,\n  s.matched_sector_names,\n  s.matched_impacts\nFROM public.ordinances o\nLEFT JOIN LATERAL public.get_consolidated_subscribers_for_ordinance(o.id) s ON TRUE\nWHERE o.id = $1::uuid;",
+        "options": {
+          "queryReplacement": "={{ [$json.id] }}"
+        }
+      },
+      "id": "node-pg-get-consolidated-subscribers",
+      "name": "Postgres - Match Consolidado de Assinantes (RPC)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3480,
+        240
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "fiscalia-postgres-cred",
+          "name": "Fiscalia Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-has-subscriber",
+              "leftValue": "={{ Boolean($json.user_id) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-if-has-subscribers",
+      "name": "IF - Possui Assinantes Afetados?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3720,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all();\nconst DISCLAIMER = '⚠️ Aviso Legal: Este alerta é gerado de forma automatizada pelo assistente Fiscália em caráter meramente informativo e educacional, não substituindo consultoria jurídica ou contábil formal.';\n\nconst urgencyBadge = {\n  ALTA: '🔴 URGÊNCIA ALTA',\n  MEDIA: '🟡 URGÊNCIA MÉDIA',\n  BAIXA: '🟢 URGÊNCIA BAIXA'\n};\n\nreturn rows.map((item) => {\n  const row = item.json;\n  const badge = urgencyBadge[row.grau_urgencia] || '🟡 ALERTA TRIBUTÁRIO';\n  const tributosStr = Array.isArray(row.tributos) && row.tributos.length > 0\n    ? row.tributos.join(', ')\n    : 'IBS / CBS';\n  const sectorNamesStr = Array.isArray(row.matched_sector_names) && row.matched_sector_names.length > 0\n    ? row.matched_sector_names.join(', ')\n    : 'Setores Monitorados';\n\n  let impacts = [];\n  if (Array.isArray(row.matched_impacts)) {\n    impacts = row.matched_impacts;\n  } else if (typeof row.matched_impacts === 'string') {\n    try {\n      impacts = JSON.parse(row.matched_impacts);\n    } catch (e) {\n      impacts = [];\n    }\n  }\n\n  const impactsTelegramLines = impacts.length > 0\n    ? impacts.map((imp) => {\n        const nome = imp.setor_nome || imp.setor_slug || 'Setor Impactado';\n        const resumo = imp.resumo_impacto_setor || row.resumo_geral;\n        const acao = imp.acao_recomendada || 'Revisar procedimentos fiscais com sua contabilidade.';\n        return `📌 *${nome}*\\n• *Impacto:* ${resumo}\\n• *Ação Recomendada:* ${acao}`;\n      }).join('\\n\\n')\n    : `📌 *${sectorNamesStr}*\\n• *Impacto:* ${row.resumo_geral}\\n• *Ação Recomendada:* Avaliar adequação aos novos leiautes e regras da LC 214/2025.`;\n\n  const telegramText = [\n    `🏛️ *FISCÁLIA — ALERTA DA REFORMA TRIBUTÁRIA*`,\n    `${badge} | Escopo: *${row.escopo}*`,\n    ``,\n    `📄 *${row.act_number}*`,\n    `_${row.title}_`,\n    ``,\n    `👤 *Assinante:* ${row.display_name || 'Contribuinte'}`,\n    `🎯 *Seus Setores Impactados:* ${sectorNamesStr}`,\n    `💰 *Tributos:* ${tributosStr}`,\n    `📅 *Vigência / Prazo:* ${row.previsao_vigencia || 'Conforme LC 214/2025'}`,\n    ``,\n    `📋 *Resumo Executivo:*`,\n    `${row.resumo_geral}`,\n    ``,\n    `🔍 *Impacto Consolidado nos Seus Setores:*`,\n    impactsTelegramLines,\n    ``,\n    `🔗 *Texto Oficial (DOU/RFB):* ${row.official_url}`,\n    ``,\n    `_${DISCLAIMER}_`\n  ].join('\\n');\n\n  const slackBlocks = [\n    {\n      type: 'header',\n      text: {\n        type: 'plain_text',\n        text: `🏛️ Fiscália | ${badge}: ${row.act_number}`.slice(0, 150),\n        emoji: true\n      }\n    },\n    {\n      type: 'section',\n      text: {\n        type: 'mrkdwn',\n        text: `*${row.title}*\\n${row.resumo_geral}`\n      }\n    },\n    {\n      type: 'section',\n      fields: [\n        {\n          type: 'mrkdwn',\n          text: `*Setores Impactados:*\\n${sectorNamesStr}`\n        },\n        {\n          type: 'mrkdwn',\n          text: `*Tributos / Escopo:*\\n${tributosStr} (${row.escopo})`\n        },\n        {\n          type: 'mrkdwn',\n          text: `*Previsão de Vigência:*\\n${row.previsao_vigencia || 'Imediata / LC 214'}`\n        },\n        {\n          type: 'mrkdwn',\n          text: `*Fonte Oficial:*\\n<${row.official_url}|Abrir Ato no DOU / RFB>`\n        }\n      ]\n    },\n    {\n      type: 'divider'\n    },\n    {\n      type: 'section',\n      text: {\n        type: 'mrkdwn',\n        text: `* Detalhamento Consolidado para seus Setores:*\\n\\n${impactsTelegramLines}`\n      }\n    },\n    {\n      type: 'context',\n      elements: [\n        {\n          type: 'mrkdwn',\n          text: DISCLAIMER\n        }\n      ]\n    }\n  ];\n\n  const hasTelegramToken = Boolean($env.TELEGRAM_BOT_TOKEN && !String($env.TELEGRAM_BOT_TOKEN).includes('your_'));\n  const hasSlackToken = Boolean($env.SLACK_BOT_TOKEN && !String($env.SLACK_BOT_TOKEN).includes('your_'));\n\n  return {\n    json: {\n      ...row,\n      telegram_text: telegramText,\n      slack_blocks: slackBlocks,\n      slack_fallback_text: `[Fiscália] ${badge} - ${row.act_number}: ${row.title}`,\n      can_send_telegram: row.channel_type === 'telegram' && hasTelegramToken,\n      can_send_slack: row.channel_type === 'slack' && hasSlackToken\n    }\n  };\n});"
+      },
+      "id": "node-format-consolidated-alert",
+      "name": "Formatar Alerta Consolidado (Telegram & Slack Block Kit)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3980,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-channel-telegram",
+                    "leftValue": "={{ $json.channel_type }}",
+                    "rightValue": "telegram",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "telegram"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-channel-slack",
+                    "leftValue": "={{ $json.channel_type }}",
+                    "rightValue": "slack",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "slack"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-switch-channel",
+      "name": "Switch - Canal de Notificação",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        4220,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"chat_id\": $json.chat_id,\n  \"text\": $json.telegram_text,\n  \"parse_mode\": \"Markdown\",\n  \"disable_web_page_preview\": false\n} }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "node-http-send-telegram",
+      "name": "HTTP Request - Enviar Alerta Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4480,
+        80
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SLACK_BOT_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"channel\": $json.chat_id || $env.SLACK_DEFAULT_CHANNEL || \"#alertas-tributarios\",\n  \"text\": $json.slack_fallback_text,\n  \"blocks\": $json.slack_blocks,\n  \"unfurl_links\": false\n} }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "node-http-send-slack",
+      "name": "HTTP Request - Enviar Alerta Slack Block Kit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4480,
+        280
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const sourceAlert = $('Switch - Canal de Notificação').item.json;\nconst apiResult = $input.item.json;\n\nreturn {\n  json: {\n    ordinance_id: sourceAlert.ordinance_id,\n    act_number: sourceAlert.act_number,\n    user_id: sourceAlert.user_id,\n    channel_type: sourceAlert.channel_type,\n    chat_id: sourceAlert.chat_id,\n    matched_sector_slugs: sourceAlert.matched_sector_slugs,\n    delivery_api_response: apiResult\n  }\n};"
+      },
+      "id": "node-prepare-delivery-log",
+      "name": "Preparar Registro de Entrega",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4740,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO public.alert_deliveries (ordinance_id, user_id, channel_type)\nVALUES ($1::uuid, $2::uuid, $3::text)\nON CONFLICT (ordinance_id, user_id) DO NOTHING\nRETURNING id, ordinance_id, user_id, channel_type, delivered_at;",
+        "options": {
+          "queryReplacement": "={{ [$json.ordinance_id, $json.user_id, $json.channel_type] }}"
+        }
+      },
+      "id": "node-pg-insert-alert-delivery",
+      "name": "Postgres - Registrar Entrega (alert_deliveries)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        4980,
+        180
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "fiscalia-postgres-cred",
+          "name": "Fiscalia Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst mode = $('Normalizar Entrada e Modo').first()?.json?.action || 'replay';\n\nreturn [\n  {\n    json: {\n      status: 'ok',\n      mode,\n      dispatched_alerts_count: items.filter((i) => i.json && (i.json.id || i.json.user_id)).length,\n      completed_at: new Date().toISOString(),\n      details: items.map((i) => i.json)\n    }\n  }\n];"
+      },
+      "id": "node-push-summary-response",
+      "name": "Resumo Final de Disparo Push",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5240,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  id,\n  act_number,\n  title,\n  resumo_geral,\n  raw_excerpt,\n  affected_sector_slugs\nFROM public.ordinances\nWHERE embedding IS NULL\nORDER BY published_at DESC;",
+        "options": {}
+      },
+      "id": "node-pg-fetch-null-embeddings",
+      "name": "Postgres - Buscar Ordinances Sem Embedding",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        960,
+        580
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "fiscalia-postgres-cred",
+          "name": "Fiscalia Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-has-null-embedding-row",
+              "leftValue": "={{ Boolean($json.id) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-if-needs-backfill",
+      "name": "IF - Existem Atos Sem Embedding?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1220,
+        580
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/{{ $env.GEMINI_EMBEDDING_MODEL || 'text-embedding-004' }}:embedContent?key={{ $env.GEMINI_API_KEY }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"model\": \"models/\" + ($env.GEMINI_EMBEDDING_MODEL || \"text-embedding-004\"),\n  \"content\": {\n    \"parts\": [\n      {\n        \"text\": ($json.act_number + \" - \" + $json.title + \"\\n\" + ($json.resumo_geral || \"\") + \"\\n\" + ($json.raw_excerpt || \"\")).slice(0, 7500)\n      }\n    ]\n  },\n  \"outputDimensionality\": 768\n} }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "node-gemini-embedding-backfill",
+      "name": "Gemini Embedding Backfill (768d)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1480,
+        540
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ord = $('IF - Existem Atos Sem Embedding?').item.json;\nconst values = $input.item.json?.embedding?.values || [];\n\nif (!Array.isArray(values) || values.length !== 768) {\n  throw new Error(`Embedding inválido retornado para ordinance ${ord.id}: esperado 768 dimensões, recebido ${values.length}`);\n}\n\nreturn {\n  json: {\n    id: ord.id,\n    act_number: ord.act_number,\n    vector_literal: `[${values.join(',')}]`\n  }\n};"
+      },
+      "id": "node-format-backfill-vector",
+      "name": "Formatar Vetor 768d (Backfill)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1720,
+        540
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE public.ordinances\nSET embedding = $2::vector(768)\nWHERE id = $1::uuid\nRETURNING id, act_number, title;",
+        "options": {
+          "queryReplacement": "={{ [$json.id, $json.vector_literal] }}"
+        }
+      },
+      "id": "node-pg-update-backfill-embedding",
+      "name": "Postgres - Atualizar Embedding Backfill",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1980,
+        540
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "fiscalia-postgres-cred",
+          "name": "Fiscalia Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const updated = $input.all().filter((i) => i.json && i.json.id);\nreturn [\n  {\n    json: {\n      status: 'ok',\n      mode: 'backfill_embeddings',\n      updated_count: updated.length,\n      updated_ordinances: updated.map((i) => ({\n        id: i.json.id,\n        act_number: i.json.act_number,\n        title: i.json.title\n      })),\n      completed_at: new Date().toISOString()\n    }\n  }\n];"
+      },
+      "id": "node-backfill-summary-response",
+      "name": "Resumo Final Backfill Embeddings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        580
+      ]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (2h)": {
+      "main": [
+        [
+          {
+            "node": "Normalizar Entrada e Modo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Simular DOU": {
+      "main": [
+        [
+          {
+            "node": "Normalizar Entrada e Modo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar Entrada e Modo": {
+      "main": [
+        [
+          {
+            "node": "Roteador de Modo (Live / Replay / Backfill)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Roteador de Modo (Live / Replay / Backfill)": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Feed Normas RFB / DOU",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Postgres - Selecionar Ato Replay Seed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Postgres - Buscar Ordinances Sem Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Feed Normas RFB / DOU": {
+      "main": [
+        [
+          {
+            "node": "Extrair HTML, SHA-256 e Pré-Filtro Regex",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair HTML, SHA-256 e Pré-Filtro Regex": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Verificar external_hash Existente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Verificar external_hash Existente": {
+      "main": [
+        [
+          {
+            "node": "IF - Ato Inédito?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Ato Inédito?": {
+      "main": [
+        [
+          {
+            "node": "Gemini 2.5 Flash - Classificação Multi-Setorial",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini 2.5 Flash - Classificação Multi-Setorial": {
+      "main": [
+        [
+          {
+            "node": "Validar e Sanitizar Classificação Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar e Sanitizar Classificação Gemini": {
+      "main": [
+        [
+          {
+            "node": "IF - Relevante Tributário?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Relevante Tributário?": {
+      "main": [
+        [
+          {
+            "node": "Gemini Embedding (text-embedding-004 768d)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Embedding (text-embedding-004 768d)": {
+      "main": [
+        [
+          {
+            "node": "Preparar Vetor 768d e Arrays SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Vetor 768d e Arrays SQL": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Upsert Ordinance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Upsert Ordinance": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Match Consolidado de Assinantes (RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Selecionar Ato Replay Seed": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Match Consolidado de Assinantes (RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Match Consolidado de Assinantes (RPC)": {
+      "main": [
+        [
+          {
+            "node": "IF - Possui Assinantes Afetados?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Possui Assinantes Afetados?": {
+      "main": [
+        [
+          {
+            "node": "Formatar Alerta Consolidado (Telegram & Slack Block Kit)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resumo Final de Disparo Push",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatar Alerta Consolidado (Telegram & Slack Block Kit)": {
+      "main": [
+        [
+          {
+            "node": "Switch - Canal de Notificação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch - Canal de Notificação": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Enviar Alerta Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Request - Enviar Alerta Slack Block Kit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Enviar Alerta Telegram": {
+      "main": [
+        [
+          {
+            "node": "Preparar Registro de Entrega",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Enviar Alerta Slack Block Kit": {
+      "main": [
+        [
+          {
+            "node": "Preparar Registro de Entrega",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Registro de Entrega": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Registrar Entrega (alert_deliveries)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Registrar Entrega (alert_deliveries)": {
+      "main": [
+        [
+          {
+            "node": "Resumo Final de Disparo Push",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Buscar Ordinances Sem Embedding": {
+      "main": [
+        [
+          {
+            "node": "IF - Existem Atos Sem Embedding?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Existem Atos Sem Embedding?": {
+      "main": [
+        [
+          {
+            "node": "Gemini Embedding Backfill (768d)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resumo Final Backfill Embeddings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Embedding Backfill (768d)": {
+      "main": [
+        [
+          {
+            "node": "Formatar Vetor 768d (Backfill)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatar Vetor 768d (Backfill)": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Atualizar Embedding Backfill",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Atualizar Embedding Backfill": {
+      "main": [
+        [
+          {
+            "node": "Resumo Final Backfill Embeddings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

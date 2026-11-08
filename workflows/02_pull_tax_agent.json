@@ -1,0 +1,923 @@
+{
+  "id": "fiscalia_wf_02_pull_tax_agent",
+  "name": "02 - Fiscália: Consultor Tributário Pull (Telegram & Slack + AI Agent ReAct)",
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo",
+    "saveManualExecutions": true
+  },
+  "versionId": "c2020000-0000-4000-8000-000000000002",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "fiscalia-local-n8n-instance"
+  },
+  "tags": [
+    {
+      "name": "fiscalia"
+    },
+    {
+      "name": "pull-agent"
+    },
+    {
+      "name": "lc-214"
+    }
+  ],
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "fiscalia-telegram",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a2000001-0001-4000-8000-000000000001",
+      "name": "Webhook Telegram (/webhook/fiscalia-telegram)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        160,
+        300
+      ],
+      "webhookId": "fiscalia-telegram-webhook"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "fiscalia-slack",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a2000001-0002-4000-8000-000000000002",
+      "name": "Webhook Slack (/webhook/fiscalia-slack)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        160,
+        520
+      ],
+      "webhookId": "fiscalia-slack-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first()?.json || {};\nconst body = raw.body && typeof raw.body === 'object' ? raw.body : raw;\n\n// 1. Verifica Challenge da Slack Events API (url_verification)\nif (body.type === 'url_verification' && body.challenge) {\n  return [\n    {\n      json: {\n        is_slack_challenge: true,\n        challenge: String(body.challenge),\n        channel_type: 'slack'\n      }\n    }\n  ];\n}\n\nlet channelType = 'telegram';\nlet externalUserId = 'anon-user';\nlet chatId = 'anon-chat';\nlet displayName = 'Contribuinte Fiscália';\nlet messageText = '';\n\n// 2. Detecção de Payload Telegram (Update / Message / CallbackQuery)\nif (body.message || body.edited_message || body.callback_query) {\n  const msg = body.message || body.edited_message || body.callback_query?.message || {};\n  const from = body.callback_query?.from || msg.from || {};\n  channelType = 'telegram';\n  externalUserId = String(from.id || msg.chat?.id || 'tg-demo-user');\n  chatId = String(msg.chat?.id || from.id || 'tg-demo-chat');\n  displayName = [from.first_name, from.last_name].filter(Boolean).join(' ') || from.username || 'Usuário Telegram';\n  messageText = String(body.callback_query?.data || msg.text || '').trim();\n}\n// 3. Detecção de Payload Slack Events API ou Slash Commands\nelse if (body.event || body.command || body.team_id || body.channel_type === 'slack' || String(raw.webhookUrl || '').includes('fiscalia-slack')) {\n  channelType = 'slack';\n  if (body.event) {\n    externalUserId = String(body.event.user || 'slack-demo-user');\n    chatId = String(body.event.channel || 'slack-demo-channel');\n    displayName = String(body.event.user_profile?.real_name || body.event.username || `Slack User ${externalUserId}`);\n    messageText = String(body.event.text || '').replace(/<@[A-Z0-9]+>/g, '').trim();\n  } else if (body.command) {\n    externalUserId = String(body.user_id || 'slack-demo-user');\n    chatId = String(body.channel_id || 'slack-demo-channel');\n    displayName = String(body.user_name || 'Usuário Slack');\n    messageText = `${body.command} ${body.text || ''}`.trim();\n  } else {\n    externalUserId = String(body.external_user_id || body.user_id || 'slack-demo-user');\n    chatId = String(body.chat_id || body.channel_id || 'slack-demo-channel');\n    displayName = String(body.display_name || body.user_name || 'Usuário Slack');\n    messageText = String(body.message_text || body.text || '').trim();\n  }\n}\n// 4. Payload direto via cURL / Testes Automatizados\nelse {\n  channelType = String(body.channel_type || 'telegram').toLowerCase() === 'slack' ? 'slack' : 'telegram';\n  externalUserId = String(body.external_user_id || body.user_id || 'demo-user-001');\n  chatId = String(body.chat_id || externalUserId);\n  displayName = String(body.display_name || 'Empresa Demo Fiscália');\n  messageText = String(body.message_text || body.text || body.query || '/resumo').trim();\n}\n\nconst sessionId = `${channelType}:${externalUserId}`;\n\n// Identifica rota: /setores, /resumo, /simular_dou ou agente_conversacional\nlet routeType = 'agente_conversacional';\nconst lowerMsg = messageText.toLowerCase();\nif (lowerMsg.startsWith('/setores') || lowerMsg.startsWith('!setores')) {\n  routeType = 'cmd_setores';\n} else if (lowerMsg.startsWith('/resumo') || lowerMsg.startsWith('!resumo')) {\n  routeType = 'cmd_resumo';\n} else if (lowerMsg.startsWith('/simular_dou') || lowerMsg.startsWith('!simular_dou')) {\n  routeType = 'cmd_simular_dou';\n}\n\nreturn [\n  {\n    json: {\n      is_slack_challenge: false,\n      channel_type: channelType,\n      external_user_id: externalUserId,\n      chat_id: chatId,\n      display_name: displayName,\n      message_text: messageText,\n      session_id: sessionId,\n      route_type: routeType\n    }\n  }\n];"
+      },
+      "id": "a2000001-0003-4000-8000-000000000003",
+      "name": "Normalizar Payload Multi-Canal (Telegram & Slack)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        410
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-slack-challenge",
+              "leftValue": "={{ $json.is_slack_challenge }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a2000001-0004-4000-8000-000000000004",
+      "name": "É Slack URL Verification?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        680,
+        410
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ challenge: $json.challenge }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "a2000001-0005-4000-8000-000000000005",
+      "name": "Responder Challenge Slack",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        940,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH ctx AS (\n  SELECT * FROM public.get_user_context_and_catalog($1::text, $2::text, $3::text, $4::text)\n),\nhist AS (\n  SELECT COALESCE(\n    jsonb_agg(h.message ORDER BY h.id ASC),\n    '[]'::jsonb\n  ) AS recent_history\n  FROM (\n    SELECT id, message\n    FROM public.n8n_chat_histories\n    WHERE session_id = ($1::text || ':' || $2::text)\n    ORDER BY id DESC\n    LIMIT 6\n  ) h\n)\nSELECT\n  ctx.*,\n  hist.recent_history\nFROM ctx\nCROSS JOIN hist;",
+        "options": {
+          "queryReplacement": "={{ [$json.channel_type, $json.external_user_id, $json.chat_id, $json.display_name] }}"
+        }
+      },
+      "id": "a2000001-0006-4000-8000-000000000006",
+      "name": "Pré-Injeção SQL: get_user_context_and_catalog + Histórico",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        940,
+        460
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "fiscalia-postgres-cred",
+          "name": "Fiscália Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const norm = $('Normalizar Payload Multi-Canal (Telegram & Slack)').first().json;\nconst sqlCtx = $input.first()?.json || {};\n\nconst subscribedSlugs = Array.isArray(sqlCtx.subscribed_sector_slugs)\n  ? sqlCtx.subscribed_sector_slugs\n  : [];\n\nreturn [\n  {\n    json: {\n      ...norm,\n      user_id: sqlCtx.user_id,\n      business_context: sqlCtx.business_context || 'Não informado',\n      subscribed_sector_slugs: subscribedSlugs,\n      subscribed_sectors_detail: sqlCtx.subscribed_sectors_detail || [],\n      available_catalog: sqlCtx.available_catalog || [],\n      recent_history: sqlCtx.recent_history || []\n    }\n  }\n];"
+      },
+      "id": "a2000001-0007-4000-8000-000000000007",
+      "name": "Consolidar Contexto do Usuário",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.route_type }}",
+                    "rightValue": "cmd_setores",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "cmd_setores"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.route_type }}",
+                    "rightValue": "cmd_resumo",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "cmd_resumo"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.route_type }}",
+                    "rightValue": "cmd_simular_dou",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "cmd_simular_dou"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.route_type }}",
+                    "rightValue": "agente_conversacional",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "agente_conversacional"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "a2000001-0008-4000-8000-000000000008",
+      "name": "Roteador: Comandos Rápidos vs AI Agent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1460,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $input.first().json;\nconst rawArgs = ctx.message_text.replace(/^(\\/|!)setores\\s*/i, '').trim();\n\nconst aliasMap = {\n  tecnologia: 'tecnologia_saas',\n  tecnologia_ti: 'tecnologia_saas',\n  saas: 'tecnologia_saas',\n  ti: 'tecnologia_saas',\n  saude: 'saude_servicos_medicos',\n  agro: 'agronegocio',\n  varejo: 'varejo_comercio',\n  comercio: 'varejo_comercio',\n  industria: 'industria_manufatura',\n  industria_transformacao: 'industria_manufatura',\n  construcao: 'construcao_imobiliario',\n  imobiliario: 'construcao_imobiliario',\n  transporte: 'transporte_logistica',\n  logistica: 'transporte_logistica',\n  financeiro: 'servicos_financeiros',\n  financeiro_seguros: 'servicos_financeiros',\n  alimentacao: 'alimentacao_hotelaria',\n  bares_restaurantes_hotelaria: 'alimentacao_hotelaria',\n  servicos_profissionais: 'profissoes_regulamentadas',\n  profissoes: 'profissoes_regulamentadas',\n  energia: 'energia_combustiveis_telecom',\n  energia_combustiveis: 'energia_combustiveis_telecom'\n};\n\nconst normalizeSlug = (s) => aliasMap[s] || s;\n\nlet action = 'list_only';\nlet slugs = [];\n\nif (rawArgs) {\n  const parts = rawArgs.split(/\\s+/);\n  const firstWord = parts[0].toLowerCase();\n  if (['add', 'set', 'remove', 'clear'].includes(firstWord)) {\n    action = firstWord;\n    slugs = parts.slice(1).join(',').split(/[\\s,;]+/).map((s) => normalizeSlug(s.trim().toLowerCase())).filter(Boolean);\n  } else {\n    action = 'add';\n    slugs = rawArgs.split(/[\\s,;]+/).map((s) => normalizeSlug(s.trim().toLowerCase())).filter(Boolean);\n  }\n}\n\nconst pgSectorArray = `{${slugs.map((s) => `\"${s.replace(/\"/g, '')}\"`).join(',')}}`;\n\nreturn [\n  {\n    json: {\n      ...ctx,\n      cmd_action: action,\n      cmd_slugs: slugs,\n      pg_sector_array: pgSectorArray\n    }\n  }\n];"
+      },
+      "id": "a2000001-0009-4000-8000-000000000009",
+      "name": "Parsear Comando /setores",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  CASE\n    WHEN $2::text = 'list_only' THEN jsonb_build_object(\n      'success', true,\n      'action_applied', 'list_only',\n      'subscribed_sector_slugs', COALESCE((SELECT array_agg(us.sector_slug ORDER BY us.sector_slug) FROM public.user_subscriptions us WHERE us.user_id = $1::uuid), ARRAY[]::text[]),\n      'subscribed_sector_names', COALESCE((SELECT array_agg(s.name ORDER BY s.slug) FROM public.user_subscriptions us JOIN public.sectors s ON s.slug = us.sector_slug WHERE us.user_id = $1::uuid), ARRAY[]::text[])\n    )\n    ELSE public.manage_user_subscription($1::uuid, $2::text, $3::text[], NULL)\n  END AS subscription_result;",
+        "options": {
+          "queryReplacement": "={{ [$json.user_id, $json.cmd_action, $json.pg_sector_array] }}"
+        }
+      },
+      "id": "a2000001-0010-4000-8000-000000000010",
+      "name": "Executar manage_user_subscription (/setores)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2020,
+        140
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "fiscalia-postgres-cred",
+          "name": "Fiscália Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Parsear Comando /setores').first().json;\nconst res = $input.first()?.json?.subscription_result || {};\nconst catalog = Array.isArray(ctx.available_catalog) ? ctx.available_catalog : [];\nconst currentSlugs = Array.isArray(res.subscribed_sector_slugs) ? res.subscribed_sector_slugs : ctx.subscribed_sector_slugs;\nconst currentNames = Array.isArray(res.subscribed_sector_names) ? res.subscribed_sector_names : [];\n\nconst catalogLines = catalog.map((c) => {\n  const isSub = currentSlugs.includes(c.slug);\n  return `${isSub ? '✅' : '▫️'} \\`${c.slug}\\`\\n   *${c.name}* _(CNAEs: ${(c.cnae_examples || []).slice(0, 2).join(', ')})_`;\n}).join('\\n\\n');\n\nconst replyText = [\n  `🏛️ *Fiscália — Gestão de Setores Monitorados (LC 214/2025)*`,\n  ``,\n  `👤 *Contribuinte:* ${ctx.display_name} (\\`${ctx.session_id}\\`)`,\n  `📌 *Setores Ativos (${currentSlugs.length}):* ${currentNames.length > 0 ? currentNames.join(', ') : 'Nenhum setor assinado ainda'}`,\n  res.action_applied && res.action_applied !== 'list_only' ? `🔄 *Ação executada:* \\`${res.action_applied}\\`` : null,\n  ``,\n  `📋 *Catálogo Canônico dos 12 Setores da Reforma Tributária (LC 214/2025):*`,\n  ``,\n  catalogLines,\n  ``,\n  `💡 *Como atualizar seus setores rapidamente:*`,\n  `• Adicionar setores: \\`/setores add tecnologia_saas profissoes_regulamentadas\\``,\n  `• Substituir lista: \\`/setores set saude_servicos_medicos educacao\\``,\n  `• Remover setor: \\`/setores remove varejo_comercio\\``,\n  `• Limpar todos: \\`/setores clear\\``,\n  ``,\n  `⚖️ _Disclaimer Legal: Informações baseadas na LC 214/2025 para fins de inteligência tributária. Não substitui parecer jurídico ou contábil formal._`\n].filter((line) => line !== null).join('\\n');\n\nreturn [\n  {\n    json: {\n      ...ctx,\n      subscribed_sector_slugs: currentSlugs,\n      reply_text: replyText,\n      response_type: 'command_setores'\n    }\n  }\n];"
+      },
+      "id": "a2000001-0011-4000-8000-000000000011",
+      "name": "Formatar Resposta /setores",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2280,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH user_sectors AS (\n  SELECT\n    s.slug,\n    s.name,\n    m.regime_type,\n    m.estimated_effective_rate,\n    m.reduction_percent,\n    m.legal_basis,\n    m.credit_rules,\n    m.transition_schedule\n  FROM public.sectors s\n  JOIN public.tax_reform_matrix m ON m.sector_slug = s.slug\n  WHERE s.slug IN (\n    SELECT us.sector_slug FROM public.user_subscriptions us WHERE us.user_id = $1::uuid\n  )\n  ORDER BY s.slug\n),\nrecent_ordinances AS (\n  SELECT\n    o.act_number,\n    o.title,\n    o.official_url,\n    o.published_at,\n    o.escopo,\n    o.grau_urgencia,\n    o.resumo_geral,\n    o.previsao_vigencia\n  FROM public.ordinances o\n  WHERE o.escopo = 'GERAL'\n     OR o.affected_sector_slugs && COALESCE(\n       ARRAY(SELECT us.sector_slug FROM public.user_subscriptions us WHERE us.user_id = $1::uuid),\n       ARRAY[]::text[]\n     )\n  ORDER BY o.published_at DESC, o.created_at DESC\n  LIMIT 4\n)\nSELECT\n  COALESCE((SELECT jsonb_agg(row_to_json(u)) FROM user_sectors u), '[]'::jsonb) AS matrix_rows,\n  COALESCE((SELECT jsonb_agg(row_to_json(r)) FROM recent_ordinances r), '[]'::jsonb) AS ordinances_rows;",
+        "options": {
+          "queryReplacement": "={{ [$json.user_id] }}"
+        }
+      },
+      "id": "a2000001-0012-4000-8000-000000000012",
+      "name": "Consultar Matriz + Portarias (/resumo)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1760,
+        320
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "fiscalia-postgres-cred",
+          "name": "Fiscália Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Consolidar Contexto do Usuário').first().json;\nconst data = $input.first()?.json || {};\nconst matrixRows = Array.isArray(data.matrix_rows) ? data.matrix_rows : [];\nconst ordRows = Array.isArray(data.ordinances_rows) ? data.ordinances_rows : [];\n\nlet matrixSection = '';\nif (matrixRows.length === 0) {\n  matrixSection = '⚠️ Você ainda não possui setores vinculados ao seu perfil. Use `/setores add tecnologia_ti` (ou outro setor da LC 214) para personalizar seu painel.';\n} else {\n  matrixSection = matrixRows.map((m) => [\n    `🔹 *${m.name}* (\\`${m.slug}\\`)`,\n    `   • *Regime LC 214:* ${m.regime_type} (Redução: ${m.reduction_percent}% | Alíquota Efetiva Est.: ${m.estimated_effective_rate})`,\n    `   • *Base Legal:* ${m.legal_basis}`,\n    `   • *Créditos IBS/CBS:* ${m.credit_rules}`\n  ].join('\\n')).join('\\n\\n');\n}\n\nconst ordSection = ordRows.length === 0\n  ? 'Nenhuma portaria recente encontrada.'\n  : ordRows.map((o) => `• *[${o.grau_urgencia}] ${o.act_number}* (${o.published_at}) — ${o.resumo_geral}\\n  🔗 [Link Oficial Receita/DOU](${o.official_url})`).join('\\n\\n');\n\nconst replyText = [\n  `📊 *Fiscália — Panorama Tributário Setorial (/resumo)*`,\n  ``,\n  `*(a) Setor(es) Analisado(s) & Situação Atual:*`,\n  matrixSection,\n  ``,\n  `*(b) Cronograma de Transição 2026–2033 (LC 214/2025):*`,\n  `• *2026:* Alíquota-teste (CBS 0,9% + IBS 0,1%) compensável com PIS/Cofins e destaque obrigatório em NF-e/NFS-e.`,\n  `• *2027:* Entrada plena da CBS e extinção do PIS/Cofins; início do Split Payment inteligente.`,\n  `• *2029–2032:* Redução progressiva do ICMS/ISS (10% a 40%) e escalonamento do IBS.`,\n  `• *2033:* Vigência integral do IVA Dual (IBS + CBS) e extinção definitiva do ICMS/ISS.`,\n  ``,\n  `*(c) Portarias e Atos Normativos Recentes (DOU / RFB):*`,\n  ordSection,\n  ``,\n  `*(d) Ação Recomendada:*`,\n  `Parametrizar o ERP e layouts de documentos fiscais eletrônicos (cClassTrib / CST-IBS/CBS) conforme os atos normativos listados acima.`,\n  ``,\n  `⚖️ _Disclaimer Legal: Este panorama é gerado por inteligência artificial com base na LC 214/2025 e atos públicos da RFB/DOU, possuindo caráter estritamente informativo. Não substitui consultoria contábil ou parecer jurídico formal._`\n].join('\\n');\n\nreturn [\n  {\n    json: {\n      ...ctx,\n      reply_text: replyText,\n      response_type: 'command_resumo'\n    }\n  }\n];"
+      },
+      "id": "a2000001-0013-4000-8000-000000000013",
+      "name": "Formatar Resposta /resumo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2040,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/simular-dou",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"action\": \"replay\",\n  \"triggered_by\": \"{{ $json.session_id }}\"\n}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "a2000001-0014-4000-8000-000000000014",
+      "name": "Disparar Webhook Workflow 1 (/simular_dou)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        500
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Consolidar Contexto do Usuário').first().json;\nconst wf1Res = $input.first()?.json || {};\nconst ok = !wf1Res.error;\n\nconst replyText = [\n  `🚨 *Fiscália — Simulação Ao Vivo do Monitor DOU (/simular_dou)*`,\n  ``,\n  ok\n    ? `✅ O *Workflow 01 (Monitor Proativo DOU & RFB)* foi acionado com sucesso via \\`POST http://localhost:5678/webhook/simular-dou\\` (\\`{\"action\": \"replay\"}\\`).`\n    : `⚠️ O disparo para \\`http://localhost:5678/webhook/simular-dou\\` retornou aviso: \\`${wf1Res.error?.message || 'Verifique se o Workflow 01 está ativo no n8n'}\\`.`,\n  ``,\n  `📡 *O que acontece agora:*`,\n  `1. O Workflow 01 processa os atos normativos da Receita Federal / DOU.`,\n  `2. Realiza a triagem estruturada e o cruzamento com os setores inscritos de cada contribuinte via \\`get_consolidated_subscribers_for_ordinance\\`.`,\n  `3. Dispara alertas consolidados (zero spam) nos canais ativos.`,\n  ``,\n  `⚖️ _Disclaimer Legal: Simulação técnica de monitoramento normativo da Reforma Tributária (LC 214/2025)._`\n].join('\\n');\n\nreturn [\n  {\n    json: {\n      ...ctx,\n      simulation_response: wf1Res,\n      reply_text: replyText,\n      response_type: 'command_simular_dou'\n    }\n  }\n];"
+      },
+      "id": "a2000001-0015-4000-8000-000000000015",
+      "name": "Formatar Resposta /simular_dou",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2040,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $input.first().json;\nconst text = (ctx.message_text || '').toLowerCase();\nconst catalog = Array.isArray(ctx.available_catalog) ? ctx.available_catalog : [];\n\n// Detecta se o usuário mencionou algum dos 12 setores na pergunta\nconst mentionedSlugs = [];\nfor (const item of catalog) {\n  const slugWords = item.slug.split('_');\n  if (text.includes(item.slug) || text.includes(item.name.toLowerCase()) || slugWords.some((w) => w.length > 3 && text.includes(w))) {\n    mentionedSlugs.push(item.slug);\n  }\n}\n\n// Heurística semântica extra para termos comuns\nconst keywordMap = {\n  tecnologia_saas: ['software', 'saas', 'ti', 'cloud', 'dados', 'sistema', 'tecnologia'],\n  saude_servicos_medicos: ['hospital', 'clinica', 'clínica', 'medico', 'médico', 'medicamento', 'farmacia', 'plano de saude', 'saude', 'saúde'],\n  educacao: ['escola', 'faculdade', 'universidade', 'ensino', 'curso', 'educacao', 'educação'],\n  agronegocio: ['agro', 'fazenda', 'soja', 'pecuaria', 'produtor rural', 'insumo'],\n  construcao_imobiliario: ['obra', 'incorporadora', 'imovel', 'imóvel', 'aluguel', 'locacao', 'construcao', 'construção'],\n  transporte_logistica: ['frete', 'caminhao', 'logistica', 'logística', 'transporte', 'passageiro'],\n  profissoes_regulamentadas: ['advocacia', 'contabilidade', 'contador', 'consultoria', 'engenharia', 'arquitetura'],\n  varejo_comercio: ['loja', 'e-commerce', 'varejo', 'supermercado', 'comercio', 'comércio'],\n  industria_manufatura: ['fabrica', 'fábrica', 'industria', 'indústria', 'manufatura', 'exportacao'],\n  servicos_financeiros: ['banco', 'fintech', 'seguro', 'credito', 'financeira', 'split payment'],\n  energia_combustiveis_telecom: ['combustivel', 'energia', 'solar', 'gas', 'etanol', 'monofasico', 'telecom'],\n  alimentacao_hotelaria: ['restaurante', 'bar', 'hotel', 'turismo', 'evento', 'gorjeta']\n};\n\nfor (const [slug, words] of Object.entries(keywordMap)) {\n  if (words.some((w) => text.includes(w)) && !mentionedSlugs.includes(slug)) {\n    mentionedSlugs.push(slug);\n  }\n}\n\nconst targetSlugs = Array.from(new Set([...mentionedSlugs, ...(ctx.subscribed_sector_slugs || [])]));\nconst wantsSubscriptionUpdate = /(cadastrar|assinar|monitorar|adicionar setor|meu setor é|minha empresa é|atuo no setor)/i.test(text);\nconst wantsLiveDou = /(dou de hoje|tempo real|saiu hoje|publicado hoje)/i.test(text);\n\nreturn [\n  {\n    json: {\n      ...ctx,\n      target_sector_slugs: targetSlugs,\n      mentioned_sector_slugs: mentionedSlugs,\n      wants_subscription_update: wantsSubscriptionUpdate,\n      wants_live_dou: wantsLiveDou,\n      tool_name: 'consultar_situacao_e_cronograma_setorial',\n      sector_slugs: targetSlugs,\n      query: ctx.message_text\n    }\n  }\n];"
+      },
+      "id": "a2000001-0016-4000-8000-000000000016",
+      "name": "Preparar Orquestração ReAct & Tools",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "fiscalia_wf_03_agent_tools",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "a2000001-0017-4000-8000-000000000017",
+      "name": "Invocar Sub-Workflow Tool B (Matriz LC 214)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        2020,
+        720
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prep = $('Preparar Orquestração ReAct & Tools').first().json;\nconst toolBOutput = $input.first()?.json || {};\n\nreturn [\n  {\n    json: {\n      ...prep,\n      tool_b_results: toolBOutput.results || [],\n      tool_name: 'buscar_portarias_por_setor_rag',\n      sector_slugs: prep.target_sector_slugs,\n      query: prep.message_text\n    }\n  }\n];"
+      },
+      "id": "a2000001-0018-4000-8000-000000000018",
+      "name": "Preparar Chamada Tool C (RAG pgvector)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2260,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "fiscalia_wf_03_agent_tools",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "a2000001-0019-4000-8000-000000000019",
+      "name": "Invocar Sub-Workflow Tool C (Portarias RAG)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        2500,
+        720
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('Preparar Chamada Tool C (RAG pgvector)').first().json;\nconst toolCOutput = $input.first()?.json || {};\nconst toolBResults = Array.isArray(prev.tool_b_results) ? prev.tool_b_results : [];\nconst toolCResults = Array.isArray(toolCOutput.results) ? toolCOutput.results : [];\n\nconst apiKey = ($env.GEMINI_API_KEY || '').trim();\nconst modelName = ($env.GEMINI_MODEL_AGENT || 'gemini-2.5-flash').trim();\n\n// Definição das 4 Tools ReAct declaradas para o modelo Gemini (Function Calling)\nconst geminiToolsSpec = [\n  {\n    name: 'gerenciar_setor_usuario',\n    description: 'Adiciona, define, remove ou limpa os setores econômicos monitorados pelo usuário (LC 214/2025) e atualiza seu contexto de negócio.'\n  },\n  {\n    name: 'consultar_situacao_e_cronograma_setorial',\n    description: 'Consulta a matriz tributária da LC 214/2025 para os setores solicitados, retornando regime, alíquota efetiva, redução, base legal, regras de crédito e cronograma 2026-2033.'\n  },\n  {\n    name: 'buscar_portarias_por_setor_rag',\n    description: 'Busca semântica vetorial (pgvector 768d) nas portarias e instruções normativas da RFB/DOU filtrada pelos setores do usuário + escopo GERAL.'\n  },\n  {\n    name: 'verificar_dou_tempo_real',\n    description: 'Consulta em tempo real o portal de Normas da Receita Federal / DOU (timeout 8s) extraindo os 5 atos mais recentes do dia.'\n  }\n];\n\nconst systemInstruction = `Você é o Fiscália, Consultor Tributário Inteligente especializado na Reforma Tributária Brasileira (Lei Complementar nº 214/2025, IBS, CBS e Imposto Seletivo) e nos atos normativos da Receita Federal (RFB) e Diário Oficial da União (DOU).\n\nREGRAS OBRIGATÓRIAS DE RESPOSTA:\n1. Estruture SEMPRE a resposta exatamente nas 4 seções abaixo:\n   *(a) Setor Analisado & Situação Atual*\n   *(b) Alíquotas, Regimes Diferenciados e Cronograma 2026–2033*\n   *(c) Portarias Recentes (com links oficiais)*\n   *(d) Ação Recomendada*\n2. Ao final, inclua obrigatoriamente o *Disclaimer Legal* informando que a análise tem caráter informativo baseado na LC 214/2025 e não substitui parecer contábil ou jurídico formal.\n3. Utilize exclusivamente os dados factuais da Matriz LC 214 e das Portarias RAG fornecidos no contexto abaixo. Nunca invente números de portarias ou links.`;\n\nconst promptContext = JSON.stringify({\n  usuario: {\n    user_id: prev.user_id,\n    nome: prev.display_name,\n    canal: prev.channel_type,\n    setores_assinados: prev.subscribed_sector_slugs,\n    contexto_negocio: prev.business_context\n  },\n  pergunta_usuario: prev.message_text,\n  historico_recente: prev.recent_history,\n  tools_disponiveis_subworkflow_03: geminiToolsSpec,\n  tool_b_matriz_lc214: toolBResults,\n  tool_c_portarias_rag: toolCResults\n}, null, 2);\n\nlet agentReply = '';\nlet usedModel = 'deterministic_structured_fallback';\n\nif (apiKey && apiKey !== 'your_gemini_api_key_here') {\n  try {\n    const geminiRes = await this.helpers.httpRequest({\n      method: 'POST',\n      url: `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,\n      headers: { 'Content-Type': 'application/json' },\n      body: {\n        systemInstruction: {\n          parts: [{ text: systemInstruction }]\n        },\n        contents: [\n          {\n            role: 'user',\n            parts: [{ text: `Responda à consulta do contribuinte com base nos dados oficiais extraídos pelas Tools do Sub-Workflow 03 do Fiscália:\\n\\n${promptContext}` }]\n          }\n        ],\n        generationConfig: {\n          temperature: 0.2,\n          maxOutputTokens: 1600\n        }\n      },\n      json: true,\n      timeout: 20000\n    });\n\n    const candidateText = geminiRes?.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('\\n').trim();\n    if (candidateText) {\n      agentReply = candidateText;\n      usedModel = modelName;\n    }\n  } catch (err) {\n    usedModel = `fallback_after_error: ${err.message}`;\n  }\n}\n\nif (!agentReply) {\n  const primarySector = toolBResults[0] || {\n    sector_name: 'Setor Geral / Múltiplos Setores (LC 214/2025)',\n    sector_slug: (prev.target_sector_slugs || [])[0] || 'geral',\n    regime_type: 'Regime Padrão IVA Dual (IBS + CBS)',\n    estimated_effective_rate: '~26,5% (alíquota de referência padrão)',\n    reduction_percent: 0,\n    legal_basis: 'LC 214/2025',\n    credit_rules: 'Não cumulatividade plena com crédito financeiro amplo sobre aquisições tributadas.',\n    key_obligations: ['Destaque de CBS (0,9%) e IBS (0,1%) em 2026', 'Adaptação ao Split Payment'],\n    transition_schedule: {\n      '2026': 'Alíquota-teste CBS 0,9% + IBS 0,1% compensável com PIS/Cofins',\n      '2027': 'Vigência plena da CBS e extinção do PIS/Cofins',\n      '2029_2032': 'Transição gradual do ICMS/ISS para o IBS',\n      '2033': 'Vigência integral do novo sistema tributário'\n    }\n  };\n\n  const sectorListSummary = toolBResults.length > 0\n    ? toolBResults.map((s) => `• *${s.sector_name}* (\\`${s.sector_slug}\\`): ${s.regime_type} — Base Legal: ${s.legal_basis}`).join('\\n')\n    : `• *${primarySector.sector_name}*: ${primarySector.regime_type} (${primarySector.legal_basis})`;\n\n  const scheduleObj = primarySector.transition_schedule || {};\n  const scheduleLines = Object.entries(scheduleObj).map(([yr, desc]) => `  - *${yr}:* ${desc}`).join('\\n');\n\n  const ordLines = toolCResults.length > 0\n    ? toolCResults.slice(0, 3).map((o) => `• *${o.act_number}* (${o.published_at || '2025/2026'}) — _${o.title}_\\n  Resumo: ${o.resumo_geral}\\n  Vigência: ${o.previsao_vigencia || 'Conforme ato'} | 🔗 [Link Oficial](${o.official_url})`).join('\\n\\n')\n    : '• Consulte os atos normativos atualizados da RFB/DOU através do comando `/resumo`.';\n\n  agentReply = [\n    `🤖 *Consultor Tributário Fiscália — Análise Técnica LC 214/2025*`,\n    ``,\n    `*(a) Setor Analisado & Situação Atual*`,\n    sectorListSummary,\n    `Regras de Crédito: ${primarySector.credit_rules}`,\n    ``,\n    `*(b) Alíquotas, Regimes Diferenciados e Cronograma 2026–2033*`,\n    `• *Alíquota Efetiva Estimada:* ${primarySector.estimated_effective_rate} (Redução legal: ${primarySector.reduction_percent}%)`,\n    `• *Cronograma de Transição:*`,\n    scheduleLines || '  - 2026 a 2033: Transição escalonada CBS/IBS conforme LC 214/2025.',\n    ``,\n    `*(c) Portarias Recentes (com links oficiais)*`,\n    ordLines,\n    ``,\n    `*(d) Ação Recomendada*`,\n    `1. Revisar a classificação fiscal (NCM/NBS e \\`cClassTrib\\`) nas emissões de NF-e/NFS-e para 2026.\\n2. Avaliar o impacto de fluxo de caixa do *Split Payment* e mapear créditos de IBS/CBS na cadeia de fornecedores.`,\n    ``,\n    `⚖️ *Disclaimer Legal:* _Esta análise foi elaborada de forma automatizada pelo Fiscália com base na Lei Complementar nº 214/2025 e nos atos normativos públicos da Receita Federal / DOU. Possui caráter exclusivamente informativo e não substitui parecer jurídico ou consultoria contábil formal._`\n  ].join('\\n');\n}\n\nreturn [\n  {\n    json: {\n      ...prev,\n      model_used: usedModel,\n      reply_text: agentReply,\n      response_type: 'ai_agent_react'\n    }\n  }\n];"
+      },
+      "id": "a2000001-0020-4000-8000-000000000020",
+      "name": "AI Agent ReAct (Gemini 2.5 + Síntese Estruturada LC 214)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2760,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO public.n8n_chat_histories (session_id, message)\nVALUES\n  ($1::varchar, jsonb_build_object('type', 'human', 'content', $2::text, 'timestamp', NOW())),\n  ($1::varchar, jsonb_build_object('type', 'ai', 'content', $3::text, 'timestamp', NOW()))\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [$json.session_id, $json.message_text, $json.reply_text] }}"
+        }
+      },
+      "id": "a2000001-0021-4000-8000-000000000021",
+      "name": "Gravar Memória em n8n_chat_histories (Postgres)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3020,
+        720
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "fiscalia-postgres-cred",
+          "name": "Fiscália Postgres"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const agentData = $('AI Agent ReAct (Gemini 2.5 + Síntese Estruturada LC 214)').first().json;\nreturn [{ json: agentData }];"
+      },
+      "id": "a2000001-0022-4000-8000-000000000022",
+      "name": "Preservar Payload Pós-Memória",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3260,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\nreturn [\n  {\n    json: {\n      channel_type: item.channel_type,\n      external_user_id: item.external_user_id,\n      chat_id: item.chat_id,\n      display_name: item.display_name,\n      session_id: item.session_id,\n      user_id: item.user_id,\n      route_type: item.route_type,\n      response_type: item.response_type,\n      subscribed_sector_slugs: item.subscribed_sector_slugs || [],\n      reply_text: item.reply_text,\n      timestamp: new Date().toISOString()\n    }\n  }\n];"
+      },
+      "id": "a2000001-0023-4000-8000-000000000023",
+      "name": "Unificar Resposta para Despacho Multi-Canal",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-channel-slack",
+              "leftValue": "={{ $json.channel_type }}",
+              "rightValue": "slack",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a2000001-0024-4000-8000-000000000024",
+      "name": "Canal é Slack ou Telegram?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3760,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst slackToken = ($env.SLACK_BOT_TOKEN || '').trim();\nlet deliveryStatus = 'skipped_no_token_configured';\n\nif (slackToken && slackToken !== 'xoxb-your-slack-bot-token-here') {\n  try {\n    await this.helpers.httpRequest({\n      method: 'POST',\n      url: 'https://slack.com/api/chat.postMessage',\n      headers: {\n        Authorization: `Bearer ${slackToken}`,\n        'Content-Type': 'application/json; charset=utf-8'\n      },\n      body: {\n        channel: item.chat_id,\n        text: item.reply_text,\n        blocks: [\n          {\n            type: 'section',\n            text: {\n              type: 'mrkdwn',\n              text: item.reply_text.slice(0, 2950)\n            }\n          }\n        ]\n      },\n      json: true,\n      timeout: 8000\n    });\n    deliveryStatus = 'sent_slack_block_kit';\n  } catch (err) {\n    deliveryStatus = `slack_error: ${err.message}`;\n  }\n}\n\nreturn [\n  {\n    json: {\n      ...item,\n      channel_delivery_status: deliveryStatus\n    }\n  }\n];"
+      },
+      "id": "a2000001-0025-4000-8000-000000000025",
+      "name": "Enviar Resposta Slack (Block Kit chat.postMessage)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4020,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst tgToken = ($env.TELEGRAM_BOT_TOKEN || '').trim();\nlet deliveryStatus = 'skipped_no_token_configured';\n\nif (tgToken && tgToken !== 'your_telegram_bot_token_here') {\n  try {\n    await this.helpers.httpRequest({\n      method: 'POST',\n      url: `https://api.telegram.org/bot${tgToken}/sendMessage`,\n      headers: {\n        'Content-Type': 'application/json'\n      },\n      body: {\n        chat_id: item.chat_id,\n        text: item.reply_text,\n        parse_mode: 'Markdown',\n        disable_web_page_preview: true\n      },\n      json: true,\n      timeout: 8000\n    });\n    deliveryStatus = 'sent_telegram_markdown';\n  } catch (err) {\n    deliveryStatus = `telegram_error: ${err.message}`;\n  }\n}\n\nreturn [\n  {\n    json: {\n      ...item,\n      channel_delivery_status: deliveryStatus\n    }\n  }\n];"
+      },
+      "id": "a2000001-0026-4000-8000-000000000026",
+      "name": "Enviar Resposta Telegram (sendMessage Markdown)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4020,
+        540
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, system: 'Fiscalia Pull Tax Agent', channel_type: $json.channel_type, session_id: $json.session_id, user_id: $json.user_id, route_type: $json.route_type, response_type: $json.response_type, subscribed_sector_slugs: $json.subscribed_sector_slugs, channel_delivery_status: $json.channel_delivery_status, reply_text: $json.reply_text, timestamp: $json.timestamp }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "a2000001-0027-4000-8000-000000000027",
+      "name": "Retornar JSON Estruturado no Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        4300,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Telegram (/webhook/fiscalia-telegram)": {
+      "main": [
+        [
+          {
+            "node": "Normalizar Payload Multi-Canal (Telegram & Slack)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Slack (/webhook/fiscalia-slack)": {
+      "main": [
+        [
+          {
+            "node": "Normalizar Payload Multi-Canal (Telegram & Slack)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar Payload Multi-Canal (Telegram & Slack)": {
+      "main": [
+        [
+          {
+            "node": "É Slack URL Verification?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "É Slack URL Verification?": {
+      "main": [
+        [
+          {
+            "node": "Responder Challenge Slack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Pré-Injeção SQL: get_user_context_and_catalog + Histórico",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pré-Injeção SQL: get_user_context_and_catalog + Histórico": {
+      "main": [
+        [
+          {
+            "node": "Consolidar Contexto do Usuário",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consolidar Contexto do Usuário": {
+      "main": [
+        [
+          {
+            "node": "Roteador: Comandos Rápidos vs AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Roteador: Comandos Rápidos vs AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Parsear Comando /setores",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Consultar Matriz + Portarias (/resumo)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Disparar Webhook Workflow 1 (/simular_dou)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar Orquestração ReAct & Tools",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar Orquestração ReAct & Tools",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear Comando /setores": {
+      "main": [
+        [
+          {
+            "node": "Executar manage_user_subscription (/setores)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Executar manage_user_subscription (/setores)": {
+      "main": [
+        [
+          {
+            "node": "Formatar Resposta /setores",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatar Resposta /setores": {
+      "main": [
+        [
+          {
+            "node": "Unificar Resposta para Despacho Multi-Canal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar Matriz + Portarias (/resumo)": {
+      "main": [
+        [
+          {
+            "node": "Formatar Resposta /resumo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatar Resposta /resumo": {
+      "main": [
+        [
+          {
+            "node": "Unificar Resposta para Despacho Multi-Canal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Disparar Webhook Workflow 1 (/simular_dou)": {
+      "main": [
+        [
+          {
+            "node": "Formatar Resposta /simular_dou",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatar Resposta /simular_dou": {
+      "main": [
+        [
+          {
+            "node": "Unificar Resposta para Despacho Multi-Canal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Orquestração ReAct & Tools": {
+      "main": [
+        [
+          {
+            "node": "Invocar Sub-Workflow Tool B (Matriz LC 214)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Invocar Sub-Workflow Tool B (Matriz LC 214)": {
+      "main": [
+        [
+          {
+            "node": "Preparar Chamada Tool C (RAG pgvector)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Chamada Tool C (RAG pgvector)": {
+      "main": [
+        [
+          {
+            "node": "Invocar Sub-Workflow Tool C (Portarias RAG)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Invocar Sub-Workflow Tool C (Portarias RAG)": {
+      "main": [
+        [
+          {
+            "node": "AI Agent ReAct (Gemini 2.5 + Síntese Estruturada LC 214)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent ReAct (Gemini 2.5 + Síntese Estruturada LC 214)": {
+      "main": [
+        [
+          {
+            "node": "Gravar Memória em n8n_chat_histories (Postgres)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gravar Memória em n8n_chat_histories (Postgres)": {
+      "main": [
+        [
+          {
+            "node": "Preservar Payload Pós-Memória",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preservar Payload Pós-Memória": {
+      "main": [
+        [
+          {
+            "node": "Unificar Resposta para Despacho Multi-Canal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unificar Resposta para Despacho Multi-Canal": {
+      "main": [
+        [
+          {
+            "node": "Canal é Slack ou Telegram?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Canal é Slack ou Telegram?": {
+      "main": [
+        [
+          {
+            "node": "Enviar Resposta Slack (Block Kit chat.postMessage)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Enviar Resposta Telegram (sendMessage Markdown)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Resposta Slack (Block Kit chat.postMessage)": {
+      "main": [
+        [
+          {
+            "node": "Retornar JSON Estruturado no Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Resposta Telegram (sendMessage Markdown)": {
+      "main": [
+        [
+          {
+            "node": "Retornar JSON Estruturado no Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

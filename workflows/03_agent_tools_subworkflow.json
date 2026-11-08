@@ -1,0 +1,438 @@
+{
+  "id": "fiscalia_wf_03_agent_tools",
+  "name": "03 - Fiscália: Sub-Workflow de Tools do Agente (LC 214 & RAG)",
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo",
+    "saveManualExecutions": true
+  },
+  "versionId": "c3030000-0000-4000-8000-000000000003",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "fiscalia-local-n8n-instance"
+  },
+  "tags": [
+    {
+      "name": "fiscalia"
+    },
+    {
+      "name": "agent-tools"
+    },
+    {
+      "name": "lc-214"
+    }
+  ],
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "b3000001-0001-4000-8000-000000000001",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        180,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first()?.json || {};\nconst payload = raw.query && typeof raw.query === 'object' && !Array.isArray(raw.query) ? raw.query : raw;\n\nconst toolName = String(payload.tool_name || payload.tool || 'consultar_situacao_e_cronograma_setorial').trim();\nconst userId = payload.user_id ? String(payload.user_id).trim() : null;\n\nlet sectorSlugs = [];\nif (Array.isArray(payload.sector_slugs)) {\n  sectorSlugs = payload.sector_slugs.map((s) => String(s).trim().toLowerCase()).filter(Boolean);\n} else if (typeof payload.sector_slugs === 'string' && payload.sector_slugs.trim() !== '') {\n  sectorSlugs = payload.sector_slugs\n    .replace(/^\\{|\\}$/g, '')\n    .split(',')\n    .map((s) => s.trim().toLowerCase())\n    .filter(Boolean);\n}\n\nconst pgSectorArrayLiteral = `{${sectorSlugs.map((s) => `\"${s.replace(/\"/g, '')}\"`).join(',')}}`;\nconst action = String(payload.action || 'add').trim().toLowerCase();\nconst businessContext = payload.business_context ? String(payload.business_context).trim() : null;\nconst searchQuery = String(payload.query || payload.search_query || 'Reforma Tributária LC 214 CBS IBS').trim();\n\nreturn [\n  {\n    json: {\n      tool_name: toolName,\n      user_id: userId,\n      sector_slugs: sectorSlugs,\n      pg_sector_array: pgSectorArrayLiteral,\n      action,\n      business_context: businessContext,\n      query: searchQuery\n    }\n  }\n];"
+      },
+      "id": "b3000001-0002-4000-8000-000000000002",
+      "name": "Normalizar Payload da Tool",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.tool_name }}",
+                    "rightValue": "gerenciar_setor_usuario",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "gerenciar_setor_usuario"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.tool_name }}",
+                    "rightValue": "consultar_situacao_e_cronograma_setorial",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "consultar_situacao_e_cronograma_setorial"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.tool_name }}",
+                    "rightValue": "buscar_portarias_por_setor_rag",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "buscar_portarias_por_setor_rag"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.tool_name }}",
+                    "rightValue": "verificar_dou_tempo_real",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "verificar_dou_tempo_real"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "b3000001-0003-4000-8000-000000000003",
+      "name": "Roteador de Tools (Switch)",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        660,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT public.manage_user_subscription($1::uuid, $2::text, $3::text[], $4::text) AS result;",
+        "options": {
+          "queryReplacement": "={{ [$json.user_id, $json.action, $json.pg_sector_array, $json.business_context] }}"
+        }
+      },
+      "id": "b3000001-0004-4000-8000-000000000004",
+      "name": "Tool A: gerenciar_setor_usuario (Postgres)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        980,
+        140
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "fiscalia-postgres-cred",
+          "name": "Fiscália Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  s.slug AS sector_slug,\n  s.name AS sector_name,\n  s.description AS sector_description,\n  s.cnae_examples,\n  m.regime_type,\n  m.estimated_effective_rate,\n  m.reduction_percent,\n  m.legal_basis,\n  m.credit_rules,\n  m.key_obligations,\n  m.transition_schedule\nFROM public.tax_reform_matrix m\nJOIN public.sectors s ON s.slug = m.sector_slug\nWHERE (\n  COALESCE(array_length($1::text[], 1), 0) > 0\n  AND s.slug = ANY($1::text[])\n)\nOR (\n  COALESCE(array_length($1::text[], 1), 0) = 0\n  AND $2::uuid IS NOT NULL\n  AND s.slug IN (\n    SELECT us.sector_slug\n    FROM public.user_subscriptions us\n    WHERE us.user_id = $2::uuid\n  )\n)\nOR (\n  COALESCE(array_length($1::text[], 1), 0) = 0\n  AND ($2::uuid IS NULL OR NOT EXISTS (SELECT 1 FROM public.user_subscriptions us WHERE us.user_id = $2::uuid))\n)\nORDER BY s.slug\nLIMIT 12;",
+        "options": {
+          "queryReplacement": "={{ [$json.pg_sector_array, $json.user_id] }}"
+        }
+      },
+      "id": "b3000001-0005-4000-8000-000000000005",
+      "name": "Tool B: consultar_situacao_e_cronograma_setorial (Postgres)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        980,
+        320
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "fiscalia-postgres-cred",
+          "name": "Fiscália Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst apiKey = ($env.GEMINI_API_KEY || '').trim();\nconst embeddingModel = ($env.GEMINI_EMBEDDING_MODEL || 'text-embedding-004').trim();\nlet vectorLiteral = null;\nlet embeddingSource = 'fallback_null_offline';\n\nif (apiKey && apiKey !== 'your_gemini_api_key_here') {\n  try {\n    const response = await this.helpers.httpRequest({\n      method: 'POST',\n      url: `https://generativelanguage.googleapis.com/v1beta/models/${embeddingModel}:embedContent?key=${apiKey}`,\n      headers: {\n        'Content-Type': 'application/json'\n      },\n      body: {\n        model: `models/${embeddingModel}`,\n        content: {\n          parts: [{ text: item.query || 'Reforma Tributária LC 214/2025' }]\n        },\n        outputDimensionality: 768\n      },\n      json: true,\n      timeout: 7000\n    });\n\n    const values = response?.embedding?.values;\n    if (Array.isArray(values) && values.length === 768) {\n      vectorLiteral = `[${values.map((v) => Number(v).toFixed(6)).join(',')}]`;\n      embeddingSource = embeddingModel;\n    }\n  } catch (err) {\n    vectorLiteral = null;\n    embeddingSource = `fallback_null_on_error: ${err.message}`;\n  }\n}\n\nreturn [\n  {\n    json: {\n      ...item,\n      query_embedding_vector: vectorLiteral,\n      embedding_source: embeddingSource\n    }\n  }\n];"
+      },
+      "id": "b3000001-0006-4000-8000-000000000006",
+      "name": "Tool C (Passo 1): Gerar Embedding 768d (Gemini c/ Fallback)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        980,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM public.match_ordinances_by_sector($1::vector(768), $2::text[], 5, 0.35);",
+        "options": {
+          "queryReplacement": "={{ [$json.query_embedding_vector, $json.pg_sector_array] }}"
+        }
+      },
+      "id": "b3000001-0007-4000-8000-000000000007",
+      "name": "Tool C (Passo 2): buscar_portarias_por_setor_rag (pgvector)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1240,
+        520
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "fiscalia-postgres-cred",
+          "name": "Fiscália Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://normas.receita.fazenda.gov.br/sijut2consulta/consulta.action",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "FiscaliaBot/1.0 (+https://gov.br/receitafederal; Monitor Tributario LC214)"
+            },
+            {
+              "name": "Accept",
+              "value": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 8000,
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "b3000001-0008-4000-8000-000000000008",
+      "name": "Tool D (Passo 1): HTTP GET Normas RFB / DOU (Timeout 8s)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        980,
+        720
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rawInput = $input.first()?.json || {};\nconst html = typeof rawInput.data === 'string' ? rawInput.data : (typeof rawInput.body === 'string' ? rawInput.body : '');\nconst hasError = Boolean(rawInput.error || !html || html.length < 100);\n\nconst acts = [];\nif (!hasError) {\n  const rowRegex = /<tr[^>]*>([\\s\\S]*?)<\\/tr>/gi;\n  let match;\n  while ((match = rowRegex.exec(html)) !== null && acts.length < 5) {\n    const rowHtml = match[1];\n    const textClean = rowHtml\n      .replace(/<script[\\s\\S]*?<\\/script>/gi, '')\n      .replace(/<style[\\s\\S]*?<\\/style>/gi, '')\n      .replace(/<[^>]+>/g, ' ')\n      .replace(/\\s+/g, ' ')\n      .trim();\n\n    if (/(Instrução Normativa|Portaria|Ato Declaratório|Solução de Consulta|Lei Complementar)/i.test(textClean)) {\n      const linkMatch = rowHtml.match(/href=[\"']([^\"']+)[\"']/i);\n      const relativeOrAbsUrl = linkMatch ? linkMatch[1] : 'https://normas.receita.fazenda.gov.br/sijut2consulta/consulta.action';\n      const officialUrl = relativeOrAbsUrl.startsWith('http')\n        ? relativeOrAbsUrl\n        : `https://normas.receita.fazenda.gov.br/sijut2consulta/${relativeOrAbsUrl.replace(/^\\/+/, '')}`;\n\n      acts.push({\n        title: textClean.slice(0, 280),\n        official_url: officialUrl,\n        checked_at: new Date().toISOString(),\n        source: 'SIJUT2 / Normas Receita Federal / DOU'\n      });\n    }\n  }\n}\n\nif (acts.length === 0) {\n  return [\n    {\n      json: {\n        live_portal_status: hasError ? 'indisponivel_ou_timeout_8s' : 'sem_novos_atos_no_html',\n        fallback_message: 'O portal ao vivo de Normas da Receita Federal / DOU apresentou instabilidade ou não retornou novos atos na janela de 8 segundos. Utilize os atos oficiais consolidados na base Fiscália (Tool C / RAG) e o link oficial abaixo para verificação complementar.',\n        official_consultation_url: 'https://normas.receita.fazenda.gov.br/sijut2consulta/consulta.action',\n        dou_section1_url: 'https://www.in.gov.br/leiturajornal',\n        acts_extracted: []\n      }\n    }\n  ];\n}\n\nreturn [\n  {\n    json: {\n      live_portal_status: 'online',\n      checked_at: new Date().toISOString(),\n      acts_count: acts.length,\n      acts_extracted: acts\n    }\n  }\n];"
+      },
+      "id": "b3000001-0009-4000-8000-000000000009",
+      "name": "Tool D (Passo 2): Extrair Top 5 Atos DOU / Fallback Amigável",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1240,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all().map((i) => i.json);\nconst req = $('Normalizar Payload da Tool').first()?.json || {};\n\nreturn [\n  {\n    json: {\n      success: true,\n      tool_name: req.tool_name || 'unknown',\n      user_id: req.user_id || null,\n      sector_slugs: req.sector_slugs || [],\n      executed_at: new Date().toISOString(),\n      results: items,\n      response: JSON.stringify({\n        tool_name: req.tool_name,\n        sector_slugs: req.sector_slugs,\n        results: items\n      })\n    }\n  }\n];"
+      },
+      "id": "b3000001-0010-4000-8000-000000000010",
+      "name": "Formatar Resposta Unificada da Tool",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalizar Payload da Tool",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar Payload da Tool": {
+      "main": [
+        [
+          {
+            "node": "Roteador de Tools (Switch)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Roteador de Tools (Switch)": {
+      "main": [
+        [
+          {
+            "node": "Tool A: gerenciar_setor_usuario (Postgres)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Tool B: consultar_situacao_e_cronograma_setorial (Postgres)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Tool C (Passo 1): Gerar Embedding 768d (Gemini c/ Fallback)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Tool D (Passo 1): HTTP GET Normas RFB / DOU (Timeout 8s)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Tool B: consultar_situacao_e_cronograma_setorial (Postgres)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool A: gerenciar_setor_usuario (Postgres)": {
+      "main": [
+        [
+          {
+            "node": "Formatar Resposta Unificada da Tool",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool B: consultar_situacao_e_cronograma_setorial (Postgres)": {
+      "main": [
+        [
+          {
+            "node": "Formatar Resposta Unificada da Tool",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool C (Passo 1): Gerar Embedding 768d (Gemini c/ Fallback)": {
+      "main": [
+        [
+          {
+            "node": "Tool C (Passo 2): buscar_portarias_por_setor_rag (pgvector)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool C (Passo 2): buscar_portarias_por_setor_rag (pgvector)": {
+      "main": [
+        [
+          {
+            "node": "Formatar Resposta Unificada da Tool",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool D (Passo 1): HTTP GET Normas RFB / DOU (Timeout 8s)": {
+      "main": [
+        [
+          {
+            "node": "Tool D (Passo 2): Extrair Top 5 Atos DOU / Fallback Amigável",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tool D (Passo 2): Extrair Top 5 Atos DOU / Fallback Amigável": {
+      "main": [
+        [
+          {
+            "node": "Formatar Resposta Unificada da Tool",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
