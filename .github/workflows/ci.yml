@@ -1,0 +1,94 @@
+name: Fiscália CI — Database, Workflows & Contracts
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  static-and-workflow-tests:
+    name: 1. Contratos, Sintaxe JS & Grafo n8n
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Executar testes de contrato, workflows n8n e diagramas Draw.io
+        run: node --test tests/validate_workflows_and_contracts.mjs
+
+      - name: Validar sintaxe do docker-compose.yml e scripts Bash
+        run: |
+          docker compose config -q
+          bash -n scripts/import_workflows.sh
+          bash -n scripts/trigger_demo_replay.sh
+
+  postgres-pgvector-integration:
+    name: 2. Integração PostgreSQL 16 + pgvector + RPCs
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: fiscalia
+          POSTGRES_USER: fiscalia
+          POSTGRES_PASSWORD: fiscalia_secret_2026
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fiscalia -d fiscalia"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Instalar cliente PostgreSQL
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Aplicar Migrations (001 e 002) e Seeds (LC 214 + Portarias)
+        env:
+          PGPASSWORD: fiscalia_secret_2026
+          PGCLIENTENCODING: UTF8
+        run: |
+          psql -h localhost -U fiscalia -d fiscalia -v ON_ERROR_STOP=1 -f supabase/migrations/001_init_schema.sql
+          psql -h localhost -U fiscalia -d fiscalia -v ON_ERROR_STOP=1 -f supabase/migrations/002_rpc_functions.sql
+          psql -h localhost -U fiscalia -d fiscalia -v ON_ERROR_STOP=1 -f supabase/seed/001_sectors_and_matrix.sql
+          psql -h localhost -U fiscalia -d fiscalia -v ON_ERROR_STOP=1 -f supabase/seed/002_demo_ordinances.sql
+
+      - name: Executar suite de testes de integração SQL & pgvector
+        env:
+          PGPASSWORD: fiscalia_secret_2026
+          PGCLIENTENCODING: UTF8
+        run: |
+          psql -h localhost -U fiscalia -d fiscalia -v ON_ERROR_STOP=1 -f tests/sql/test_database_contracts.sql
+
+  n8n-import-smoke-test:
+    name: 3. Smoke Test de Importação na CLI Oficial do n8n
+    runs-on: ubuntu-latest
+    needs: [static-and-workflow-tests, postgres-pgvector-integration]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Subir stack Docker Compose e testar importação real no n8n
+        run: |
+          cp .env.example .env
+          docker compose up -d
+          for i in $(seq 1 30); do
+            if docker exec fiscalia-postgres pg_isready -U fiscalia -d fiscalia >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+          sleep 5
+          chmod +x scripts/import_workflows.sh
+          ./scripts/import_workflows.sh
+          docker exec -u node fiscalia-n8n n8n list:workflow
+          docker compose down -v
