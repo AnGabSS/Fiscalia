@@ -1,0 +1,75 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: fiscalia-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-fiscalia}
+      POSTGRES_USER: ${POSTGRES_USER:-fiscalia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fiscalia_secret_2026}
+      TZ: ${TZ:-America/Sao_Paulo}
+    ports:
+      - "${POSTGRES_PORT:-5435}:5432"
+    volumes:
+      - fiscalia_pgdata:/var/lib/postgresql/data
+      - ./supabase/migrations/001_init_schema.sql:/docker-entrypoint-initdb.d/01_init_schema.sql:ro
+      - ./supabase/migrations/002_rpc_functions.sql:/docker-entrypoint-initdb.d/02_rpc_functions.sql:ro
+      - ./supabase/seed/001_sectors_and_matrix.sql:/docker-entrypoint-initdb.d/03_sectors_and_matrix.sql:ro
+      - ./supabase/seed/002_demo_ordinances.sql:/docker-entrypoint-initdb.d/04_demo_ordinances.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fiscalia} -d ${POSTGRES_DB:-fiscalia}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - fiscalia-net
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: fiscalia-n8n
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB:-fiscalia}
+      DB_POSTGRESDB_USER: ${POSTGRES_USER:-fiscalia}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD:-fiscalia_secret_2026}
+      DB_POSTGRESDB_SCHEMA: n8n_internal
+      N8N_PORT: 5678
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      N8N_HOST: ${N8N_HOST:-localhost}
+      WEBHOOK_URL: ${WEBHOOK_URL:-http://localhost:5678/}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-fiscalia-n8n-encryption-key-2026-change-me}
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:-America/Sao_Paulo}
+      TZ: ${TZ:-America/Sao_Paulo}
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL_TRIAGE: ${GEMINI_MODEL_TRIAGE:-gemini-2.5-flash}
+      GEMINI_MODEL_AGENT: ${GEMINI_MODEL_AGENT:-gemini-2.5-flash}
+      GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-text-embedding-004}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      SLACK_DEFAULT_CHANNEL: ${SLACK_DEFAULT_CHANNEL:-#alertas-tributarios}
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-fiscalia}
+      POSTGRES_USER: ${POSTGRES_USER:-fiscalia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fiscalia_secret_2026}
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    volumes:
+      - fiscalia_n8n_data:/home/node/.n8n
+      - ./workflows:/workflows:ro
+    networks:
+      - fiscalia-net
+
+volumes:
+  fiscalia_pgdata:
+  fiscalia_n8n_data:
+
+networks:
+  fiscalia-net:
+    driver: bridge
